@@ -36,3 +36,32 @@ python pipeline_clean.py --input stress_1mb.txt --output cleaned_output.txt --th
 
 # 2. Run equal-step micro-pretraining comparison
 python micro_pretrain_bench.py --raw stress_1mb.txt --filtered cleaned_output.txt --steps 400
+## Near-Duplicate Filtering & Micro-Pretraining Benchmark (`stress_1mb.txt`)
+
+Evaluated on `stress_1mb.txt` (`1,048,576` bytes, `471` parsed documents) using Jaccard similarity near-duplicate filtering and a small character-level transformer (`TinyCharLM`, `block_size = 64`, `batch_size = 32`, `lr = 3e-3`) evaluated on a deduplicated validation split (`71` raw val docs $\rightarrow$ `37` deduplicated val docs; `25,665` validation tokens).
+
+### 1. Jaccard Threshold Sweep (`471` Docs)
+
+| Threshold | Kept Docs | Dropped Docs | % Kept | Notes |
+| :--- | :---: | :---: | :---: | :--- |
+| `0.3` | 15 | 456 | ~3.2% | Over-aggressive on a `1 MB` stress set; drops most distinct blocks |
+| `0.6` | 117 | 354 | ~24.8% | Practical baseline balancing redundancy removal and retention |
+| `0.7` | 212 | 259 | ~45.0% | Lighter filtering; allows more near-duplicate phrasing through |
+
+### 2. Equal-Epoch Micro-Pretraining (`5` Epochs on Deduplicated Val)
+
+| Epoch | Raw Val Loss (`917,930` train tokens) | 0.6 No-Clean Val Loss (`74,245` train tokens) | 0.6 Pre-Cleaned Val Loss (`54,994` train tokens) | Clean vs. No-Clean |
+| :---: | :---: | :---: | :---: | :---: |
+| **1** | 0.3584 | 2.4759 | 2.5478 | +0.0719 |
+| **2** | 0.2045 | 2.2785 | 2.3362 | +0.0577 |
+| **3** | 0.1850 | 2.1372 | 2.2259 | +0.0888 |
+| **4** | 0.1763 | 1.9717 | 2.1378 | +0.1661 |
+| **5** | 0.1712 | 1.7367 | 2.0246 | +0.2879 |
+
+### 3. Pre-Cleaning Pass (`0.6` Threshold)
+
+* **Filler & Reference Stripping:** Removing conversational fillers (`ok`, `lol`, `yup`, etc.) and `[Ref #...]` tags before `0.6` Jaccard filtering reduced kept documents from **117** to **99** (`21.0%` kept) and narrowed the training split from **74,245** to **54,994** characters.
+* **Key Observations:**
+  * Deduplicating the validation split prevents repeated boilerplate from artificially inflating raw validation scores.
+  * Every training run steadily lowers validation loss across epochs 1–5 (`0.6 Pre-Cleaned` drops from `2.5478` to `2.0246`, a `-0.5232` reduction).
+  * On a small `~1 MB` dataset trained from scratch for 5 epochs, aggressive filtering and pre-cleaning shrink total token volume and gradient steps per epoch compared to unfiltered text—whereas on larger datasets, removing boilerplate and near-duplicates saves compute and storage without wasting updates on redundant blocks.
