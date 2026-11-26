@@ -65,3 +65,31 @@ Evaluated on `stress_1mb.txt` (`1,048,576` bytes, `471` parsed documents) using 
   * Deduplicating the validation split prevents repeated boilerplate from artificially inflating raw validation scores.
   * Every training run steadily lowers validation loss across epochs 1–5 (`0.6 Pre-Cleaned` drops from `2.5478` to `2.0246`, a `-0.5232` reduction).
   * On a small `~1 MB` dataset trained from scratch for 5 epochs, aggressive filtering and pre-cleaning shrink total token volume and gradient steps per epoch compared to unfiltered text—whereas on larger datasets, removing boilerplate and near-duplicates saves compute and storage without wasting updates on redundant blocks.
+# Text Cleaning Ablations & `TinyCharLM` Pretraining
+
+Experiments studying how text preprocessing—separating citation tag removal (`[Ref #...]`) from standalone conversational filler removal—affects document retention, token count, and 5-epoch `TinyCharLM` validation loss on `stress_1mb.txt` (`471` raw documents) evaluated on `dedup_val` (`25,665` tokens).
+
+## Project Overview
+
+This experiment tests two targeted cleaning operations before `0.6` Jaccard near-duplicate filtering:
+
+1. **Reference tag removal (`REF_PATTERN`):** Strips `[Ref #...]` markers.
+2. **Standalone filler removal (`STANDALONE_FILLER_PATTERN`):** Strips standalone conversational fillers (`ok`, `okay`, `lol`, `lmao`, `rofl`, `yup`, `yep`, `yeah`, `nah`, `hmm`, `uh`, `um`) using fixed-width lookbehinds and sentence/line boundary checks so normal words and mid-sentence substrings are not over-matched.
+
+## Standalone Filler Regex Design
+
+Earlier versions risked two failure modes: matching substrings inside normal words, or triggering variable-length lookbehind errors in Python's `re` module. The updated pattern uses fixed-width lookbehinds (`(?<=\n)`, `(?<=[.!?]) `) and explicit start/end-of-line/sentence boundaries:
+
+```python
+import re
+
+REF_PATTERN = re.compile(r"\[Ref\s*#?\s*\d+\]", re.IGNORECASE)
+FILLER_WORDS = r"ok|okay|lol|lmao|rofl|yup|yep|yeah|nah|hmm|uh|um"
+
+STANDALONE_FILLER_PATTERN = re.compile(
+    rf"(?im)"
+    rf"(?:"
+    rf"(?:^|(?<=\n)|(?<=[.!?]) )\b(?:{FILLER_WORDS})\b(?:[.,!?;:]+|\s*$)"
+    rf"| (?:\b(?:{FILLER_WORDS})\b)[.!?]+(?=\s*$|\n)"
+    rf")"
+)
